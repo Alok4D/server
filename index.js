@@ -12,12 +12,16 @@ const port = process.env.PORT || 8000;
 
 // middleware
 const corsOptions = {
-  origin: ["http://localhost:5173", "http://localhost:5174"],
+  origin: "http://localhost:5173",
+  // origin: [
+  //   "https://stay-vista-nu.vercel.app", // Removed trailing slash for consistency
+  //   "https://stay-vista-g4yolgsxd-alok-roys-projects.vercel.app", // Removed trailing slash
+  //   "https://stayvista-live-2025-ce330.web.app", // 👈 Add this origin
+  // ],
   credentials: true,
   optionSuccessStatus: 200,
 };
 app.use(cors(corsOptions));
-
 app.use(express.json());
 app.use(cookieParser());
 
@@ -79,7 +83,7 @@ const verifyToken = async (req, res, next) => {
 };
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.1yjndj5.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
-console.log(uri);
+
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -90,6 +94,8 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
+    await client.connect();
+
     const roomsCollection = client.db("stayVista").collection("rooms");
     const usersCollection = client.db("stayVista").collection("users");
     const bookingsCollection = client.db("stayVista").collection("bookings");
@@ -265,7 +271,10 @@ async function run() {
 
     // save a booking data in db
     app.post("/booking", verifyToken, async (req, res) => {
-      const bookingData = req.body;
+      const bookingData = {
+        ...req.body,
+        status: "pending", // ✅ add default status
+      };
       const result = await bookingsCollection.insertOne(bookingData);
       res.send(result);
 
@@ -280,6 +289,80 @@ async function run() {
         subject: "Your Room Got Booked!",
         message: `Get ready to welcome ${bookingData.guest.name}`,
       });
+    });
+
+    // approve booking
+    app.patch(
+      "/booking/approve/:id",
+      verifyToken,
+      verifyHost,
+      async (req, res) => {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const updateDoc = { $set: { status: "approved" } };
+        const result = await bookingsCollection.updateOne(query, updateDoc);
+        // optionally mark room booked
+        await roomsCollection.updateOne(
+          { _id: new ObjectId(req.body.roomId) },
+          { $set: { booked: true } }
+        );
+        res.send(result);
+      }
+    );
+
+    // cancel booking (without deleting)
+    app.patch("/booking/cancel/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = { $set: { status: "canceled" } };
+      // optionally reset room booked
+      await bookingsCollection.updateOne(query, updateDoc);
+      await roomsCollection.updateOne(
+        { _id: new ObjectId(req.body.roomId) },
+        { $set: { booked: false } }
+      );
+      res.send({ success: true });
+    });
+
+    // DELETE booking
+    app.delete("/booking/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await bookingsCollection.deleteOne(query);
+      res.send(result);
+    });
+
+    // Cancel booking completely
+    app.delete("/booking/:id", verifyToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        // find the booking first
+        const booking = await bookingsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+        if (!booking)
+          return res.status(404).send({ message: "Booking not found" });
+
+        // delete booking
+        await bookingsCollection.deleteOne({ _id: new ObjectId(id) });
+
+        // reset room booked status
+        await roomsCollection.updateOne(
+          { _id: new ObjectId(booking.roomId) },
+          { $set: { booked: false } }
+        );
+
+        res
+          .status(200)
+          .send({
+            success: true,
+            message: "Booking canceled and room available",
+          });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ success: false, message: "Server error" });
+      }
     });
 
     // update room data
@@ -374,7 +457,6 @@ async function run() {
         return data;
       });
       chartData.unshift(["Day", "Sales"]);
-   
 
       // console.log(chartData);
       // console.log(bookingDetails);
@@ -490,7 +572,6 @@ async function run() {
   }
 }
 run().catch(console.dir);
-// run().catch(console.dir);
 
 app.get("/", (req, res) => {
   res.send("Hello from StayVista Server..");
