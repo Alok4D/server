@@ -12,12 +12,12 @@ const port = process.env.PORT || 8000;
 
 // middleware
 const corsOptions = {
-  origin: "http://localhost:5173",
-  // origin: [
-  //   "https://stay-vista-nu.vercel.app", // Removed trailing slash for consistency
-  //   "https://stay-vista-g4yolgsxd-alok-roys-projects.vercel.app", // Removed trailing slash
-  //   "https://stayvista-live-2025-ce330.web.app", // 👈 Add this origin
-  // ],
+  // origin: "http://localhost:5173",
+  origin: [
+    "https://stay-vista-nu.vercel.app", // Removed trailing slash for consistency
+    "https://stay-vista-g4yolgsxd-alok-roys-projects.vercel.app", // Removed trailing slash
+    "https://stayvista-live-2025-ce330.web.app", // 👈 Add this origin
+  ],
   credentials: true,
   optionSuccessStatus: 200,
 };
@@ -68,7 +68,7 @@ const sendEmail = (emailAddress, emailData) => {
 // Verify Token Middleware
 const verifyToken = async (req, res, next) => {
   const token = req.cookies?.token;
-  console.log(token);
+  // console.log(token);
   if (!token) {
     return res.status(401).send({ message: "unauthorized access" });
   }
@@ -94,11 +94,13 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
 
     const roomsCollection = client.db("stayVista").collection("rooms");
     const usersCollection = client.db("stayVista").collection("users");
     const bookingsCollection = client.db("stayVista").collection("bookings");
+    const wishlistCollection = client.db("stayVista").collection("wishlist");
+
 
     // verify admin middleware
     const verifyAdmin = async (req, res, next) => {
@@ -429,6 +431,54 @@ async function run() {
       res.send(result);
     });
 
+    // POST -> Add to wishlist
+app.post("/wishlist", async (req, res) => {
+  const item = req.body;
+  const exists = await wishlistCollection.findOne({
+    roomId: item.roomId,
+    userEmail: item.userEmail,
+  });
+
+  if (exists) {
+    return res.send({ success: false, message: "Already exists" });
+  }
+
+  const result = await wishlistCollection.insertOne(item);
+  res.send({ success: true, insertedId: result.insertedId });
+});
+
+// GET -> Check if already in wishlist
+app.get("/wishlist/check", async (req, res) => {
+  const { roomId, userEmail } = req.query;
+  const exists = await wishlistCollection.findOne({ roomId, userEmail });
+  res.send({ exists: !!exists });
+});
+
+// DELETE -> Remove from wishlist
+app.delete("/wishlist", async (req, res) => {
+  const { roomId, userEmail } = req.query;
+  const result = await wishlistCollection.deleteOne({ roomId, userEmail });
+  res.send({ success: true, deletedCount: result.deletedCount });
+});
+
+// ✅ GET -> Get all wishlist items for a specific user
+app.get("/wishlist", async (req, res) => {
+  try {
+    const { email } = req.query;
+    if (!email) {
+      return res.status(400).send({ success: false, message: "Email is required" });
+    }
+
+    const result = await wishlistCollection.find({ userEmail: email }).toArray();
+    res.send({ success: true, data: result });
+  } catch (err) {
+    console.error("Error fetching wishlist:", err);
+    res.status(500).send({ success: false, message: "Server error" });
+  }
+});
+
+
+
     // admin statistics
     app.get("/admin-stat", verifyToken, verifyAdmin, async (req, res) => {
       const bookingDetails = await bookingsCollection
@@ -506,9 +556,9 @@ async function run() {
       chartData.unshift(["Day", "Sales"]);
       // chartData.splice(0, 0, ['Day', 'Sales'])
 
-      console.log(chartData);
+      // console.log(chartData);
 
-      console.log(bookingDetails);
+      // console.log(bookingDetails);
       res.send({
         totalRooms,
         totalBookings: bookingDetails.length,
